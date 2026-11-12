@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::pin::pin;
 
 use anyhow::{Context, Result};
+use hyper_util::client::legacy::connect::HttpConnector;
 use sshx_core::proto::{
     client_update::ClientMessage, server_update::ServerMessage,
     sshx_service_client::SshxServiceClient, ClientUpdate, CloseRequest, NewShell, OpenRequest,
@@ -17,6 +18,7 @@ use tonic::transport::Channel;
 use tracing::{debug, error, warn};
 
 use crate::encrypt::Encrypt;
+use crate::resolver::FallbackResolver;
 use crate::runner::{Runner, ShellData};
 
 /// Interval for sending empty heartbeat messages to the server.
@@ -116,8 +118,20 @@ impl Controller {
     /// This is used on reconnection to the server, since some replicas may be
     /// gracefully shutting down, which means connected clients need to start a
     /// new TCP handshake.
+    ///
+    /// The client uses a DNS resolver that falls back to the nameservers in
+    /// Termux's `$PREFIX/etc/resolv.conf` if the system resolver fails, since
+    /// statically linked binaries cannot resolve addresses on Android (#141).
     async fn connect(origin: &str) -> Result<SshxServiceClient<Channel>, tonic::transport::Error> {
-        SshxServiceClient::connect(String::from(origin)).await
+        let endpoint = tonic::transport::Endpoint::new(String::from(origin))?;
+
+        let mut http = HttpConnector::new_with_resolver(FallbackResolver::default());
+        http.enforce_http(false);
+        http.set_nodelay(true);
+
+        Ok(SshxServiceClient::new(
+            endpoint.connect_with_connector(http).await?,
+        ))
     }
 
     /// Returns the name of the session.

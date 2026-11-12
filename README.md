@@ -30,6 +30,10 @@ ARMv6 and ARMv7-A systems. The Linux binaries are statically linked.
 For Windows, there are binaries for x86_64, x86, and ARM64, linked to MSVC for
 maximum compatibility.
 
+On Android, sshx also works in [Termux](https://termux.dev), where it reads
+the DNS nameservers from Termux's own `$PREFIX/etc/resolv.conf` file, since
+Android does not provide a standard `/etc/resolv.conf`.
+
 If you just want to try it out without installing, use:
 
 ```shell
