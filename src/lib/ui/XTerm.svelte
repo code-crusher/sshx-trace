@@ -167,6 +167,16 @@
     term.loadAddon(new WebglAddon());
     term.loadAddon(new ImageAddon({ enableSizeReports: false }));
 
+    // The terminal element can be unbound (null) if the component is destroyed
+    // before this async `onMount` finishes, or if it is recreated by a keyed
+    // `{#each}` block while a previous instance is still mounting. Guarding here
+    // prevents `Terminal.open(null)`, which throws a fatal
+    // "Terminal requires a parent element." error that blocks all new terminals.
+    if (!termEl) {
+      term.dispose();
+      return;
+    }
+
     term.open(termEl);
 
     term.resize(cols, rows);
