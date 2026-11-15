@@ -36,7 +36,7 @@
   import { browser } from "$app/environment";
 
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
-  import type { Terminal } from "sshx-xterm";
+  import type { IDisposable, Terminal } from "sshx-xterm";
   import { Buffer } from "buffer";
 
   import themes from "./themes";
@@ -44,6 +44,7 @@
   import CircleButtons from "./CircleButtons.svelte";
   import { settings } from "$lib/settings";
   import { TypeAheadAddon } from "$lib/typeahead";
+  import { installTerminalQueryResponder } from "$lib/terminalQueries";
 
   /** Used to determine Cmd versus Ctrl keyboard shortcuts. */
   const isMac = browser && navigator.platform.startsWith("Mac");
@@ -60,6 +61,7 @@
   }>();
 
   const typeahead = new TypeAheadAddon();
+  let queryResponder: IDisposable | undefined;
 
   export let rows: number, cols: number;
   export let write: (data: string) => void; // bound function prop
@@ -174,6 +176,22 @@
       currentTitle = title;
     });
 
+    const utf8 = new TextEncoder();
+
+    // Answer terminal queries (e.g. OSC 11 color requests, CSI 6n cursor
+    // position) that the remote program may block on. Replies go through the
+    // normal input path, exactly as if typed by the user.
+    queryResponder = installTerminalQueryResponder(term, {
+      send: (data) => {
+        dispatch("data", utf8.encode(data));
+      },
+      // Read the theme at query time so replies track theme changes.
+      getTheme: () => themes[$settings.theme],
+      isActive: () =>
+        document.hasFocus() &&
+        term!.element?.classList.contains("focus") === true,
+    });
+
     // Hack: We artificially disable scrolling when the terminal is not focused.
     // ("termEl" > div.terminal.xterm > div.xterm-screen)
     const screenEl = termEl.querySelector(".xterm-screen")! as HTMLDivElement;
@@ -202,7 +220,6 @@
     typeahead.reset();
     term.loadAddon(typeahead);
 
-    const utf8 = new TextEncoder();
     term.onData((data: string) => {
       dispatch("data", utf8.encode(data));
     });
@@ -211,7 +228,10 @@
     });
   });
 
-  onDestroy(() => term?.dispose());
+  onDestroy(() => {
+    queryResponder?.dispose();
+    term?.dispose();
+  });
 </script>
 
 <div
