@@ -9,7 +9,7 @@ const config = {
     extend: {
       fontFamily: {
         sans: ["Inter Variable", ...defaultTheme.fontFamily.sans],
-        mono: ["Fira Code VF", ...defaultTheme.fontFamily.mono],
+        mono: ["Fira Code Nerd Font Mono", ...defaultTheme.fontFamily.mono],
       },
     },
   },
