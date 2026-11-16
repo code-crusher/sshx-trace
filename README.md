@@ -73,6 +73,21 @@ anywhere: GitLab CI, CircleCI, Buildkite, CI on your Raspberry Pi, etc.
 Be careful adding this to a public GitHub repository, as any user can view the
 logs of a CI job while it is running.
 
+### Custom certificate authorities
+
+The client trusts the built-in Mozilla root certificates by default. If your
+server uses a certificate issued by a private CA, point `--cacert` (or the
+`SSHX_CACERT` environment variable) at a PEM file containing the CA
+certificates, or at a directory of such files:
+
+```shell
+sshx --server https://sshx.example.com --cacert /etc/ssl/private-ca.pem
+sshx --server https://sshx.example.com --cacert /etc/ssl/certs
+```
+
+These certificates are trusted in addition to the built-in roots, not instead of
+them.
+
 ## Development
 
 Here's how to work on the project, if you want to contribute.

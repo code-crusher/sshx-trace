@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::{self, Duration, Instant, MissedTickBehavior};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tonic::transport::Channel;
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint};
 use tracing::{debug, error, warn};
 
 use crate::encrypt::Encrypt;
@@ -25,9 +25,22 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// Interval to automatically reestablish connections.
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Options for constructing a [`Controller`].
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct ControllerOptions {
+    /// Enable read-only access mode, generating a separate write password.
+    pub enable_readers: bool,
+
+    /// Additional PEM-encoded CA certificates to trust when connecting to the
+    /// server, on top of the built-in root store.
+    pub ca_certificates: Option<Vec<u8>>,
+}
+
 /// Handles a single session's communication with the remote server.
 pub struct Controller {
     origin: String,
+    ca_certificate: Option<Certificate>,
     runner: Runner,
     encrypt: Encrypt,
     encryption_key: String,
@@ -53,6 +66,21 @@ impl Controller {
         runner: Runner,
         enable_readers: bool,
     ) -> Result<Self> {
+        let options = ControllerOptions {
+            enable_readers,
+            ..Default::default()
+        };
+        Self::new_with_options(origin, name, runner, options).await
+    }
+
+    /// Construct a new controller with additional options, connecting to the
+    /// remote server.
+    pub async fn new_with_options(
+        origin: &str,
+        name: &str,
+        runner: Runner,
+        options: ControllerOptions,
+    ) -> Result<Self> {
         debug!(%origin, "connecting to server");
         let encryption_key = rand_alphanumeric(14); // 83.3 bits of entropy
 
@@ -61,7 +89,7 @@ impl Controller {
             task::spawn_blocking(move || Encrypt::new(&encryption_key))
         };
 
-        let (write_password, kdf_write_password_task) = if enable_readers {
+        let (write_password, kdf_write_password_task) = if options.enable_readers {
             let write_password = rand_alphanumeric(14); // 83.3 bits of entropy
             let task = {
                 let write_password = write_password.clone();
@@ -72,7 +100,8 @@ impl Controller {
             (None, None)
         };
 
-        let mut client = Self::connect(origin).await?;
+        let ca_certificate = options.ca_certificates.map(Certificate::from_pem);
+        let mut client = Self::connect(origin, ca_certificate.as_ref()).await?;
         let encrypt = kdf_task.await?;
         let write_password_hash = if let Some(task) = kdf_write_password_task {
             Some(task.await?.zeros().into())
@@ -98,6 +127,7 @@ impl Controller {
         let (output_tx, output_rx) = mpsc::channel(64);
         Ok(Self {
             origin: origin.into(),
+            ca_certificate,
             runner,
             encrypt,
             encryption_key,
@@ -116,8 +146,21 @@ impl Controller {
     /// This is used on reconnection to the server, since some replicas may be
     /// gracefully shutting down, which means connected clients need to start a
     /// new TCP handshake.
-    async fn connect(origin: &str) -> Result<SshxServiceClient<Channel>, tonic::transport::Error> {
-        SshxServiceClient::connect(String::from(origin)).await
+    async fn connect(
+        origin: &str,
+        ca_certificate: Option<&Certificate>,
+    ) -> Result<SshxServiceClient<Channel>, tonic::transport::Error> {
+        let mut endpoint = Endpoint::new(String::from(origin))?;
+        if let Some(ca_certificate) = ca_certificate {
+            // Trust the built-in roots as well as any certificates from the
+            // user-provided bundle. Note that `with_enabled_roots` returns a
+            // fresh config, so it must be called before adding certificates.
+            let tls = ClientTlsConfig::new()
+                .with_enabled_roots()
+                .ca_certificate(ca_certificate.clone());
+            endpoint = endpoint.tls_config(tls)?;
+        }
+        Ok(SshxServiceClient::new(endpoint.connect().await?))
     }
 
     /// Returns the name of the session.
@@ -165,7 +208,7 @@ impl Controller {
         let hello = ClientMessage::Hello(format!("{},{}", self.name, self.token));
         send_msg(&tx, hello).await?;
 
-        let mut client = Self::connect(&self.origin).await?;
+        let mut client = Self::connect(&self.origin, self.ca_certificate.as_ref()).await?;
         let resp = client.channel(ReceiverStream::new(rx)).await?;
         let mut messages = resp.into_inner(); // A stream of server messages.
 
@@ -280,7 +323,7 @@ impl Controller {
             name: self.name.clone(),
             token: self.token.clone(),
         };
-        let mut client = Self::connect(&self.origin).await?;
+        let mut client = Self::connect(&self.origin, self.ca_certificate.as_ref()).await?;
         client.close(req).await?;
         Ok(())
     }
@@ -294,4 +337,156 @@ async fn send_msg(tx: &mpsc::Sender<ClientUpdate>, message: ClientMessage) -> Re
     tx.send(update)
         .await
         .context("failed to send message to server")
+}
+
+#[cfg(test)]
+mod tests {
+    use sshx_core::proto::{
+        sshx_service_server::{SshxService, SshxServiceServer},
+        CloseRequest, CloseResponse, OpenRequest, OpenResponse, ServerUpdate,
+    };
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+    use tonic::transport::server::TcpIncoming;
+    use tonic::transport::{Identity, Server, ServerTlsConfig};
+    use tonic::{Request, Response, Status};
+
+    use super::*;
+
+    /// A gRPC server stub that accepts any request, for testing TLS connections.
+    struct TestService;
+
+    #[tonic::async_trait]
+    impl SshxService for TestService {
+        type ChannelStream = tokio_stream::wrappers::ReceiverStream<Result<ServerUpdate, Status>>;
+
+        async fn open(
+            &self,
+            request: Request<OpenRequest>,
+        ) -> Result<Response<OpenResponse>, Status> {
+            let origin = request.into_inner().origin;
+            Ok(Response::new(OpenResponse {
+                name: "test".into(),
+                token: "token".into(),
+                url: format!("{origin}/s/test"),
+            }))
+        }
+
+        async fn channel(
+            &self,
+            _request: Request<tonic::Streaming<ClientUpdate>>,
+        ) -> Result<Response<Self::ChannelStream>, Status> {
+            let (_tx, rx) = mpsc::channel(1);
+            Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
+                rx,
+            )))
+        }
+
+        async fn close(
+            &self,
+            _request: Request<CloseRequest>,
+        ) -> Result<Response<CloseResponse>, Status> {
+            Ok(Response::new(CloseResponse {}))
+        }
+    }
+
+    /// A private CA and a server certificate for `127.0.0.1` signed by it.
+    ///
+    /// These certificates are committed under `testdata/` and valid for 100
+    /// years, so they only exist to exercise TLS verification in tests.
+    struct TestCertificates {
+        ca_pem: String,
+        server_pem: String,
+        server_key_pem: String,
+    }
+
+    /// Load the private CA and server certificate used for testing.
+    fn load_certificates() -> TestCertificates {
+        let read = |name: &str| {
+            std::fs::read_to_string(format!("{}/testdata/{name}", env!("CARGO_MANIFEST_DIR")))
+                .unwrap()
+        };
+        TestCertificates {
+            ca_pem: read("ca.pem"),
+            server_pem: read("server.pem"),
+            server_key_pem: read("server-key.pem"),
+        }
+    }
+
+    /// Start a TLS gRPC server on a random local port, returning its origin and
+    /// a shutdown handle.
+    async fn start_tls_server(certs: &TestCertificates) -> (String, oneshot::Sender<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let incoming = TcpIncoming::from_listener(listener, true, None).unwrap();
+
+        let identity = Identity::from_pem(&certs.server_pem, &certs.server_key_pem);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            Server::builder()
+                .tls_config(ServerTlsConfig::new().identity(identity))
+                .unwrap()
+                .add_service(SshxServiceServer::new(TestService))
+                .serve_with_incoming_shutdown(incoming, async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+                .unwrap();
+        });
+
+        (format!("https://{addr}"), shutdown_tx)
+    }
+
+    #[tokio::test]
+    async fn connect_rejects_unknown_ca() {
+        let certs = load_certificates();
+        let (origin, shutdown) = start_tls_server(&certs).await;
+
+        // The bundled root store does not contain our private CA.
+        assert!(Controller::connect(&origin, None).await.is_err());
+
+        shutdown.send(()).ok();
+    }
+
+    #[tokio::test]
+    async fn connect_trusts_custom_ca() -> Result<()> {
+        let certs = load_certificates();
+        let (origin, shutdown) = start_tls_server(&certs).await;
+
+        let ca = Certificate::from_pem(&certs.ca_pem);
+        Controller::connect(&origin, Some(&ca)).await?;
+
+        shutdown.send(()).ok();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn controller_connects_with_custom_ca() -> Result<()> {
+        let certs = load_certificates();
+        let (origin, shutdown) = start_tls_server(&certs).await;
+
+        let options = ControllerOptions {
+            ca_certificates: Some(certs.ca_pem.into_bytes()),
+            ..Default::default()
+        };
+        let controller =
+            Controller::new_with_options(&origin, "test", Runner::Echo, options).await?;
+        assert_eq!(controller.name(), "test");
+        controller.close().await?;
+
+        shutdown.send(()).ok();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn controller_rejects_unknown_ca() {
+        let certs = load_certificates();
+        let (origin, shutdown) = start_tls_server(&certs).await;
+
+        let controller = Controller::new(&origin, "test", Runner::Echo, false).await;
+        assert!(controller.is_err());
+
+        shutdown.send(()).ok();
+    }
 }
