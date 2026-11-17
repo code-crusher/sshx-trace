@@ -1,0 +1,10 @@
+sshx is a secure web-based, collaborative terminal.
+.
+Run a single command to share your terminal with anyone. Users can resize,
+move windows, and freely zoom and pan on an infinite canvas, see other
+people's cursors moving in real time, and connect to the nearest server in a
+globally distributed mesh.
+.
+Sessions are end-to-end encrypted with Argon2 and AES, with automatic
+reconnection and real-time latency estimates. Predictive echo enables faster
+local editing, a la Mosh.

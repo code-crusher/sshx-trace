@@ -44,6 +44,24 @@ You can also install it with [Homebrew](https://brew.sh/) on macOS.
 brew install sshx
 ```
 
+### Linux packages
+
+Prebuilt `.deb` and `.rpm` packages are available for `x86_64` and `arm64`,
+with statically linked binaries, from the [releases page](https://github.com/ekzhang/sshx/releases).
+Download the package for your platform and install it with your package
+manager:
+
+```shell
+sudo dpkg -i sshx_0.4.1_amd64.deb    # Debian and Ubuntu
+sudo rpm -i sshx-0.4.1.x86_64.rpm    # Fedora, RHEL, and CentOS
+```
+
+You can also build the packages yourself from source by running:
+
+```shell
+./scripts/package.sh
+```
+
 ### CI/CD
 
 You can run sshx in continuous integration workflows to help debug tricky

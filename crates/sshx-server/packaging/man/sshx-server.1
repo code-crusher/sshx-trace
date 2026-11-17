@@ -1,0 +1,67 @@
+.TH SSHX-SERVER 1 "2026-11-17" "sshx-server" "User Commands"
+.SH NAME
+sshx\-server \- server daemon for sshx, a secure web-based, collaborative terminal
+.SH SYNOPSIS
+.B sshx\-server
+.RB [ \-\-port\ \fIPORT\fR ]
+.RB [ \-\-listen\ \fIADDRESS\fR ]
+.RB [ \-\-secret\ \fISECRET\fR ]
+.RB [ \-\-override\-origin\ \fIURL\fR ]
+.RB [ \-\-redis\-url\ \fIURL\fR ]
+.RB [ \-\-host\ \fIHOSTNAME\fR ]
+.SH DESCRIPTION
+.B sshx\-server
+runs the server side of sshx. It serves the web frontend, terminates
+WebSocket connections from sshx clients, and routes encrypted session data
+between clients through a globally distributed mesh of server instances.
+.PP
+Session data is end\-to\-end encrypted by clients; the server only sees
+ciphertext along with session metadata. Server instances coordinate with each
+other over gRPC and persist session metadata in Redis.
+.SH OPTIONS
+.TP
+.BR \-\-port\ \fIPORT\fR
+Port to listen on (default: 8051).
+.TP
+.BR \-\-listen\ \fIADDRESS\fR
+IP address or network interface to listen on (default: ::1).
+.TP
+.BR \-\-secret\ \fISECRET\fR
+Secret used for signing session tokens (defaults to the
+.B SSHX_SECRET
+environment variable).
+.TP
+.BR \-\-override\-origin\ \fIURL\fR
+Override the origin URL returned by the Open() RPC.
+.TP
+.BR \-\-redis\-url\ \fIURL\fR
+Redis URL for state management (defaults to the
+.B SSHX_REDIS_URL
+environment variable).
+.TP
+.BR \-\-host\ \fIHOSTNAME\fR
+Hostname of this server, if running multiple servers.
+.TP
+.BR \-\-help
+Print help.
+.TP
+.BR \-\-version
+Print version.
+.SH FILES
+The server binds to
+.I ::1:8051
+by default and must be able to reach its Redis instance and peer servers over
+the network.
+.SH EXAMPLES
+.PP
+Run a server on all interfaces:
+.PP
+.RS
+.nf
+sshx\-server \-\-listen "::"
+.fi
+.RE
+.SH SEE ALSO
+.BR sshx (1)
+.PP
+https://sshx.io

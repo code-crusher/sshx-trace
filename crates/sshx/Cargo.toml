@@ -9,6 +9,30 @@ documentation.workspace = true
 keywords.workspace = true
 edition = "2021"
 
+# Metadata used by `cargo-deb` to build Debian packages for the client
+# binary; see `scripts/package.sh` and issue #35.
+[package.metadata.deb]
+maintainer = "Eric Zhang <ekzhang1@gmail.com>"
+depends = "$auto"
+section = "utils"
+extended-description-file = "packaging/description.txt"
+assets = [
+  "$auto", # binary at usr/bin/sshx
+  ["packaging/man/sshx.1.gz", "usr/share/man/man1/", "644"],
+]
+
+# Metadata used by `cargo-generate-rpm` to build RPM packages for the
+# client binary. The "target/release" prefix is resolved by cargo-generate-rpm
+# to the actual build products for the selected target.
+[package.metadata.generate-rpm]
+maintainer = "Eric Zhang <ekzhang1@gmail.com>"
+url = "https://sshx.io"
+summary = "A secure web-based, collaborative terminal"
+assets = [
+  { source = "target/release/sshx", dest = "/usr/bin/sshx", mode = "755" },
+  { source = "packaging/man/sshx.1.gz", dest = "/usr/share/man/man1/sshx.1.gz", mode = "644" },
+]
+
 [dependencies]
 aes = "0.8.3"
 ansi_term = "0.12.1"

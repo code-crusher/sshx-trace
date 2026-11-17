@@ -1,0 +1,74 @@
+.TH SSHX 1 "2026-11-17" "sshx" "User Commands"
+.SH NAME
+sshx \- a secure web-based, collaborative terminal
+.SH SYNOPSIS
+.B sshx
+.RB [ \-\-server\ \fIURL\fR ]
+.RB [ \-\-shell\ \fICOMMAND\fR ]
+.RB [ \-\-name\ \fINAME\fR ]
+.RB [ \-\-enable\-readers ]
+.RB [ \-\-quiet ]
+.SH DESCRIPTION
+.B sshx
+starts a local shell in a pseudoterminal and shares it through a web-based
+collaborative terminal session. It connects to a remote sshx server, prints a
+URL for the session, and streams terminal input and output end\-to\-end
+encrypted over WebSocket connections.
+.PP
+Anyone with the writable link can type into the shared terminal, and anyone
+with the read\-only link can watch it in real time. The terminal state is
+encrypted with Argon2 and AES, so the sshx server cannot read session data.
+.SH OPTIONS
+.TP
+.BR \-\-server\ \fIURL\fR
+Address of the remote sshx server (defaults to
+.I https://sshx.io ,
+or the
+.B SSHX_SERVER
+environment variable).
+.TP
+.BR \-\-shell\ \fICOMMAND\fR
+Local shell command to run in the terminal. Defaults to the user's default
+shell.
+.TP
+.BR \-\-name\ \fINAME\fR
+Session name displayed in the title. Defaults to
+.IR user @ hostname .
+.TP
+.B \-\-enable\-readers
+Enable read\-only access mode, generating separate URLs for viewers and
+editors.
+.TP
+.B \-\-quiet
+Quiet mode, only prints the session URL to stdout.
+.TP
+.BR \-\-help
+Print help.
+.TP
+.BR \-\-version
+Print version.
+.SH EXIT STATUS
+.B sshx
+exits with status 0 on a clean shutdown after Ctrl\-C, and non\-zero if the
+session fails to start or the connection is lost.
+.SH EXAMPLES
+.PP
+Share your default shell:
+.PP
+.RS
+.nf
+sshx
+.fi
+.RE
+.PP
+Share a specific command read\-only:
+.PP
+.RS
+.nf
+sshx \-\-shell "htop" \-\-enable\-readers
+.fi
+.RE
+.SH SEE ALSO
+.BR sshx\-server (1)
+.PP
+https://sshx.io
